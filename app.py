@@ -12,6 +12,7 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
+from langchain_core.messages import HumanMessage, AIMessage # NEW: For formatting chat history
 
 # Load environment variables from .env file
 load_dotenv()
@@ -98,6 +99,7 @@ def initialize_knowledge_base():
 
         # Initialize conversational memory
         # k=5 means it will remember the last 5 turns of conversation
+        # return_messages=True ensures that memory stores actual message objects (HumanMessage, AIMessage)
         memory = ConversationBufferWindowMemory(memory_key="chat_history", return_messages=True, k=5)
         print("Conversational memory initialized.")
 
@@ -117,7 +119,6 @@ def initialize_knowledge_base():
         print(f"Loaded {len(documents)} documents from knowledge base.")
 
         # Split documents into chunks for processing
-        # Adjust chunk_size and chunk_overlap as needed for your content
         text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
         docs = text_splitter.split_documents(documents)
         print(f"Split into {len(docs)} chunks.")
@@ -166,20 +167,42 @@ def chat():
 
     try:
         # Create a RetrievalQA chain with memory and custom prompt
+        # Note: The 'memory' object is attached to the chain.
+        # The 'chain_type_kwargs' passes the custom prompt to the underlying chain type.
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
             chain_type="stuff",
             retriever=vectorstore.as_retriever(),
-            memory=memory,
-            chain_type_kwargs={"prompt": QA_PROMPT},
+            memory=memory, # Memory is attached here
+            chain_type_kwargs={"prompt": QA_PROMPT}, # Custom prompt is used here
             return_source_documents=False
         )
 
-        # Execute the QA chain with the user's message
-        result = qa_chain({"query": user_message})
+        # Get chat history from memory explicitly for the prompt's input_variables
+        # memory.load_memory_variables({}) returns a dict like {'chat_history': [HumanMessage(...), AIMessage(...)]}
+        chat_history_messages = memory.load_memory_variables({})["chat_history"]
+
+        # Format chat history into a string as expected by your CUSTOM_PROMPT_TEMPLATE
+        # The prompt expects a string for {chat_history}, not a list of message objects.
+        formatted_chat_history = ""
+        for msg in chat_history_messages:
+            if isinstance(msg, HumanMessage):
+                formatted_chat_history += f"User: {msg.content}\n"
+            elif isinstance(msg, AIMessage):
+                formatted_chat_history += f"Sheelaa Bot: {msg.content}\n"
+
+        # Execute the QA chain with the user's message and the formatted chat history
+        # Use .invoke() as per Langchain's deprecation warning
+        result = qa_chain.invoke(
+            {"query": user_message, "chat_history": formatted_chat_history}
+        )
 
         # Extract the answer from the result
         bot_response = result.get("result", "I apologize, but I couldn't find an answer to that in Sheelaa's knowledge base. Please try rephrasing your question or ask about her services, background, or contact details.")
+
+        # Save the user message and bot response to memory
+        # This is crucial for the next turn of conversation
+        memory.save_context({"input": user_message}, {"output": bot_response})
 
         print(f"Sending response: {bot_response}")
         return jsonify({"response": bot_response}), 200
@@ -191,4 +214,4 @@ def chat():
 
 # This block ensures the Flask development server runs only when the script is executed directly
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000)
