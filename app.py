@@ -20,12 +20,9 @@ load_dotenv()
 app = Flask(__name__)
 
 # --- CORS Configuration ---
-# IMPORTANT: Replace 'https://your-netlify-frontend-url.netlify.app' with your ACTUAL Netlify URL.
-# This explicitly allows your Netlify frontend to make requests to this backend.
-# You can find your Netlify URL in your Netlify dashboard (e.g., https://random-name-12345.netlify.app)
-# If you are testing locally, you might temporarily use origins=["http://localhost:3000"] or origins=["*"]
-# For production, it's best to specify your exact frontend domain.
-CORS(app, resources={r"/*": {"origins": "https://resonant-zuccutto-bb7023.netlify.app"}})
+# IMPORTANT: Updated to allow requests from your GitHub Pages frontend URL.
+# This explicitly allows your GitHub Pages frontend to make requests to this backend.
+CORS(app, resources={r"/*": {"origins": "https://raam2912.github.io"}})
 
 
 # --- Global Variables for LLM, Vector Store, and Memory ---
