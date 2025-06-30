@@ -1,9 +1,15 @@
+# Flask and basic utilities
 Flask==3.0.3
 python-dotenv==1.0.1
-langchain==0.3.0 
+Flask-Cors==4.0.1  # Added for CORS functionality
+
+# Langchain and Google Gemini integration
+langchain==0.3.0
 langchain-google-genai==2.1.5
 chromadb==0.5.3
 numpy==1.26.4
-tiktoken==0.7.0
+tiktoken==0.7.0 # Pinned to a version known to work with Python 3.10.x
+
+# Gunicorn and its gevent worker for production deployment
 gunicorn==22.0.0
 gevent==24.2.1
