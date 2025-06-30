@@ -1,0 +1,39 @@
+# sheelaa-chatbot/backend/.gitignore
+
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+*.egg-info/
+.tox/
+.pytest_cache/
+dist/
+build/
+*.egg
+
+# Environment variables
+.env
+.flaskenv
+
+# Database files (if you were to use local SQLite for example)
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# IDE specific files
+.idea/             # PyCharm
+.vscode/           # VS Code (if you have user-specific settings you don't want to share)
+*.sublime-project
+*.sublime-workspace
+
+# Operating System files
+.DS_Store          # macOS
+Thumbs.db          # Windows
