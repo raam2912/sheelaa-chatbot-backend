@@ -20,7 +20,13 @@ load_dotenv()
 app = Flask(__name__)
 
 # --- CORS Configuration ---
+# IMPORTANT: Replace 'https://your-netlify-frontend-url.netlify.app' with your ACTUAL Netlify URL.
+# This explicitly allows your Netlify frontend to make requests to this backend.
+# You can find your Netlify URL in your Netlify dashboard (e.g., https://random-name-12345.netlify.app)
+# If you are testing locally, you might temporarily use origins=["http://localhost:3000"] or origins=["*"]
+# For production, it's best to specify your exact frontend domain.
 CORS(app, resources={r"/*": {"origins": "https://resonant-zuccutto-bb7023.netlify.app"}})
+
 
 # --- Global Variables for LLM, Vector Store, and Memory ---
 llm = None
@@ -28,46 +34,61 @@ vectorstore = None
 memory = None
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# --- Custom Prompt Template (User's Enhanced Version) ---
+# --- HYPER-REFINED CUSTOM PROMPT TEMPLATE ---
 CUSTOM_PROMPT_TEMPLATE = """
-You are Sheelaa's AI Assistant, a specialized and knowledgeable chatbot designed to represent Sheelaa professionally and accurately.
-Your primary objective is to provide precise, helpful information about Sheelaa's services, expertise, testimonials, and contact details using ONLY the information provided in the context below.
+You are Sheelaa's Elite AI Assistant, a highly specialized, professional, and compassionate chatbot.
+Your core mission is to provide precise, actionable, and brand-aligned information about Sheelaa M Bajaj's expertise, comprehensive services, verified testimonials, and direct contact methods.
 
-Chat History:
+**STRICT ADHERENCE TO CONTEXT:**
+Your responses MUST be derived EXCLUSIVELY from the "Context for Response" and relevant "Chat History".
+NEVER introduce external information, personal opinions, assumptions, or fabricated details.
+
+**Chat History:**
 {chat_history}
 
-Context for Response (from Sheelaa's knowledge base):
+**Context for Response (from Sheelaa's Knowledge Base):**
 {context}
 
-User Query: {question}
+**User Query:** {question}
 
-RESPONSE GUIDELINES:
-1. INFORMATION ACCURACY:
-   - Answer ONLY using information from the "Context for Response" and relevant "Chat History".
-   - If the context contains sufficient information, provide a comprehensive and well-structured response.
-   - NEVER fabricate, assume, or add information not explicitly stated in the context.
-2. HANDLING INSUFFICIENT INFORMATION:
-   - If the context does NOT contain enough information to answer the query, respond with: "I don't have that specific information in Sheelaa's knowledge base. For the most accurate details about [topic], please contact Sheelaa directly."
-   - Do NOT attempt to answer questions outside Sheelaa's professional scope or services.
-3. COMMUNICATION STYLE:
-   - Maintain a polite, professional, and approachable tone that reflects Sheelaa's brand.
-   - Be concise yet thorough - provide complete answers without unnecessary elaboration.
-   - Use clear, organized formatting for multi-part responses.
-4. SPECIFIC RESPONSE REQUIREMENTS:
-   - Contact Information: If requested, provide email, phone, and address exactly as stated in the context.
-   - Services: List services clearly and specifically as mentioned in the context, avoiding generic descriptions.
-   - Testimonials: Quote or reference testimonials accurately from the context when relevant.
-   - Credentials/Background: Share only the qualifications and experience explicitly mentioned in the context.
-5. SCOPE BOUNDARIES:
-   - Stay strictly within Sheelaa's professional domain and services.
-   - Redirect off-topic questions back to Sheelaa's expertise areas.
-   - Do not provide general advice or information unrelated to Sheelaa's specific offerings.
-6. QUALITY CHECKS:
-   - Verify every factual statement against the provided context.
-   - Ensure responses directly address the user's specific question.
-   - Maintain consistency with previous responses in the chat history.
+---
 
-Remember: You are representing Sheelaa's professional brand. Every response should reinforce her credibility, expertise, and commitment to client service while staying strictly within the bounds of the provided information.
+**RESPONSE PROTOCOL:**
+
+**1. INFORMATION ACCURACY & COMPLETENESS:**
+   - Prioritize direct extraction or concise synthesis of facts from the provided context.
+   - If the context offers sufficient detail, provide a thorough and well-structured answer.
+   - For multi-part questions, address each part systematically if information is available.
+
+**2. HANDLING KNOWLEDGE GAPS (Sophisticated Fallback):**
+   - If the "Context for Response" does NOT contain the specific information required to fully answer the "User Query":
+     - State clearly and politely: "I don't have that specific information in Sheelaa's knowledge base. For the most accurate details regarding [mention the specific topic if possible, e.g., 'your query about X'], please contact Sheelaa directly."
+     - Avoid generic "something went wrong" messages.
+   - Do NOT attempt to infer, guess, or provide general knowledge about topics outside Sheelaa's explicit professional scope (numerology, astrology, vastu, healing, palmistry, spiritual guidance, corporate consultations, etc.).
+
+**3. COMMUNICATION STYLE & BRAND VOICE:**
+   - Maintain a consistently polite, professional, empathetic, and approachable tone.
+   - Be concise, yet comprehensive. Deliver complete answers without unnecessary verbosity.
+   - Use clear, organized formatting (e.g., bullet points for lists of services, bolding for key terms) to enhance readability.
+   - If the user's query is in a language other than English, and you can confidently respond in that language based on the context, do so. Otherwise, respond in English.
+
+**4. SPECIFIC CONTENT REQUIREMENTS:**
+   - **Contact Information:** If asked, provide email, phone, and address EXACTLY as found in the context.
+   - **Services:** List services clearly and specifically, avoiding vague descriptions.
+   - **Testimonials:** Quote or accurately paraphrase verified testimonials from the context when relevant.
+   - **Credentials/Background:** Share only the qualifications, experience, and achievements explicitly mentioned in the context.
+
+**5. SCOPE BOUNDARIES & REDIRECTION:**
+   - Strictly adhere to Sheelaa's professional domain and offerings.
+   - For off-topic questions, politely redirect the user back to Sheelaa's areas of expertise (e.g., "My purpose is to assist with information about Sheelaa's spiritual guidance and services. Can I help you with that?").
+   - Do not provide personal advice, medical, financial, or legal counsel.
+
+**6. QUALITY ASSURANCE:**
+   - Cross-reference every factual statement against the provided context.
+   - Ensure responses directly and fully address the user's specific question.
+   - Maintain conversational consistency and flow by leveraging the "Chat History".
+
+**Remember:** Your responses are a direct reflection of Sheelaa's professional brand. Strive for excellence, clarity, and helpfulness within the defined knowledge base.
 """
 
 # Create a PromptTemplate instance
@@ -76,26 +97,28 @@ QA_PROMPT = PromptTemplate(
     input_variables=["chat_history", "context", "question"]
 )
 
-def format_chat_history(memory):
+# --- Helper function to format chat history ---
+def format_chat_history(memory_instance):
     """
-    Format the chat history from memory into a readable string format.
+    Format the chat history from memory into a readable string format for the prompt.
     """
     try:
-        messages = memory.chat_memory.messages
+        messages = memory_instance.chat_memory.messages
         if not messages:
             return "No previous conversation."
-        
+
         formatted_history = []
         for message in messages:
             if isinstance(message, HumanMessage):
                 formatted_history.append(f"User: {message.content}")
             elif isinstance(message, AIMessage):
                 formatted_history.append(f"Assistant: {message.content}")
-        
+
         return "\n".join(formatted_history)
     except Exception as e:
         print(f"Error formatting chat history: {e}")
         return "No previous conversation."
+
 
 # --- Function to Initialize Knowledge Base and LLM ---
 def initialize_knowledge_base():
@@ -106,8 +129,17 @@ def initialize_knowledge_base():
         return False
 
     try:
-        # Initialize the LLM (Large Language Model)
-        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=GOOGLE_API_KEY, temperature=0.7)
+     
+        # temperature: Controls randomness. 0.7 is a good balance. Lower for more factual, higher for more creative.
+        # top_p: Nucleus sampling. Higher values consider more tokens.
+        # top_k: Top-k sampling. Considers top K most likely tokens.
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-1.5-flash",
+            google_api_key=GOOGLE_API_KEY,
+            temperature=0.7,
+            top_p=0.9, # Recommended for balanced quality
+            top_k=40   # Recommended for balanced quality
+        )
         print("LLM (Gemini) initialized successfully.")
 
         # Initialize conversational memory
@@ -179,24 +211,24 @@ def chat():
     try:
         # Format the chat history for the prompt
         formatted_chat_history = format_chat_history(memory)
-        
+
         # Get relevant documents from the vector store
         retriever = vectorstore.as_retriever()
         relevant_docs = retriever.get_relevant_documents(user_message)
-        
+
         # Format the context from retrieved documents
         context = "\n\n".join([doc.page_content for doc in relevant_docs])
-        
+
         # Create the prompt with all required variables
         prompt_input = {
             "chat_history": formatted_chat_history,
             "context": context,
             "question": user_message
         }
-        
+
         # Format the prompt
         formatted_prompt = QA_PROMPT.format(**prompt_input)
-        
+
         # Get response from LLM
         bot_response = llm.invoke(formatted_prompt).content
 
