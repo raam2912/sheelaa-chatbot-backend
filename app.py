@@ -41,7 +41,7 @@ def initialize_knowledge_base():
     try:
         # Initialize the LLM (Large Language Model)
         # Using gemini-1.0-pro as it's a stable and widely available model for chat
-        llm = ChatGoogleGenerativeAI(model="gemini-1.0-pro", google_api_key=GOOGLE_API_KEY, temperature=0.7)
+        llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=GOOGLE_API_KEY, temperature=0.7)
         print("LLM (Gemini) initialized successfully.")
 
         # Load documents from the knowledge_base directory
