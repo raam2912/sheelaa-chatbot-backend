@@ -12,7 +12,7 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
-from langchain_core.messages import HumanMessage, AIMessage # NEW: For formatting chat history
+from langchain_core.messages import HumanMessage, AIMessage # For formatting chat history
 
 # Load environment variables from .env file
 load_dotenv()
@@ -82,6 +82,30 @@ QA_PROMPT = PromptTemplate(
     input_variables=["chat_history", "context", "question"]
 )
 
+# --- Helper function to format chat history ---
+def format_chat_history(memory_instance): # Renamed parameter to avoid conflict with global 'memory'
+    """
+    Format the chat history from memory into a readable string format for the prompt.
+    """
+    try:
+        # Access the list of messages directly from the chat_memory attribute
+        messages = memory_instance.chat_memory.messages
+        if not messages:
+            return "No previous conversation."
+
+        formatted_history = []
+        for message in messages:
+            if isinstance(message, HumanMessage):
+                formatted_history.append(f"User: {message.content}")
+            elif isinstance(message, AIMessage):
+                formatted_history.append(f"Assistant: {message.content}")
+        
+        # IMPORTANT FIX: Return the joined string AFTER the loop finishes
+        return "\n".join(formatted_history)
+    except Exception as e:
+        print(f"Error formatting chat history: {e}")
+        return "No previous conversation."
+
 
 # --- Function to Initialize Knowledge Base and LLM ---
 def initialize_knowledge_base():
@@ -93,13 +117,10 @@ def initialize_knowledge_base():
 
     try:
         # Initialize the LLM (Large Language Model)
-        # Using gemini-1.5-flash for its efficiency and broad availability
         llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=GOOGLE_API_KEY, temperature=0.7)
         print("LLM (Gemini) initialized successfully.")
 
         # Initialize conversational memory
-        # k=5 means it will remember the last 5 turns of conversation
-        # return_messages=True ensures that memory stores actual message objects (HumanMessage, AIMessage)
         memory = ConversationBufferWindowMemory(memory_key="chat_history", return_messages=True, k=5)
         print("Conversational memory initialized.")
 
@@ -166,36 +187,25 @@ def chat():
         return jsonify({"error": "Chatbot not fully initialized. Please check backend logs."}), 500
 
     try:
-        # Create a RetrievalQA chain with memory and custom prompt
-        # Note: The 'memory' object is attached to the chain.
-        # The 'chain_type_kwargs' passes the custom prompt to the underlying chain type.
+        # Format the chat history for the prompt using the new helper function
+        formatted_chat_history = format_chat_history(memory)
+
+        # Create a RetrievalQA chain WITHOUT directly attaching memory here,
+        # as we are manually passing the formatted chat history to invoke.
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
             chain_type="stuff",
             retriever=vectorstore.as_retriever(),
-            memory=memory, # Memory is attached here
-            chain_type_kwargs={"prompt": QA_PROMPT}, # Custom prompt is used here
+            chain_type_kwargs={"prompt": QA_PROMPT},
             return_source_documents=False
         )
 
-        # Get chat history from memory explicitly for the prompt's input_variables
-        # memory.load_memory_variables({}) returns a dict like {'chat_history': [HumanMessage(...), AIMessage(...)]}
-        chat_history_messages = memory.load_memory_variables({})["chat_history"]
-
-        # Format chat history into a string as expected by your CUSTOM_PROMPT_TEMPLATE
-        # The prompt expects a string for {chat_history}, not a list of message objects.
-        formatted_chat_history = ""
-        for msg in chat_history_messages:
-            if isinstance(msg, HumanMessage):
-                formatted_chat_history += f"User: {msg.content}\n"
-            elif isinstance(msg, AIMessage):
-                formatted_chat_history += f"Sheelaa Bot: {msg.content}\n"
-
-        # Execute the QA chain with the user's message and the formatted chat history
-        # Use .invoke() as per Langchain's deprecation warning
-        result = qa_chain.invoke(
-            {"query": user_message, "chat_history": formatted_chat_history}
-        )
+        # Execute the QA chain with manually provided chat history
+        # The 'chat_history' key here directly maps to the input_variables in QA_PROMPT
+        result = qa_chain.invoke({
+            "query": user_message,
+            "chat_history": formatted_chat_history
+        })
 
         # Extract the answer from the result
         bot_response = result.get("result", "I apologize, but I couldn't find an answer to that in Sheelaa's knowledge base. Please try rephrasing your question or ask about her services, background, or contact details.")
