@@ -13,3 +13,4 @@ tiktoken==0.7.0 # Pinned to a version known to work with Python 3.10.x
 # Gunicorn and its gevent worker for production deployment
 gunicorn==22.0.0
 gevent==24.2.1
+langchain-community
