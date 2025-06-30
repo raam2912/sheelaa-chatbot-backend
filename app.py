@@ -22,7 +22,7 @@ if not GOOGLE_API_KEY:
     exit(1)
 
 # --- Initialize Google Gemini LLM and Embeddings ---
-llm = ChatGoogleGenerativeAI(model="gemini-pro", google_api_key=GOOGLE_API_KEY)
+llm = ChatGoogleGenerativeAI(model="gemini-1.0-pro", google_api_key=GOOGLE_API_KEY)
 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=GOOGLE_API_KEY)
 
 # --- Knowledge Base Setup (RAG) ---
