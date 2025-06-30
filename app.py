@@ -6,10 +6,12 @@ from dotenv import load_dotenv
 # Langchain imports
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains import RetrievalQA
-from langchain_community.vectorstores import Chroma # Updated import for Chroma
-from langchain_community.document_loaders import TextLoader # Updated import for TextLoader
+from langchain_community.vectorstores import Chroma
+from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain.memory import ConversationBufferWindowMemory
+from langchain.prompts import PromptTemplate
 
 # Load environment variables from .env file
 load_dotenv()
@@ -25,14 +27,64 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://resonant-zuccutto-bb7023.netlify.app"}})
 
 
-# --- Global Variables for LLM and Vector Store ---
+# --- Global Variables for LLM, Vector Store, and Memory ---
 llm = None
 vectorstore = None
+memory = None
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+# --- Custom Prompt Template (User's Enhanced Version) ---
+CUSTOM_PROMPT_TEMPLATE = """
+You are Sheelaa's AI Assistant, a specialized and knowledgeable chatbot designed to represent Sheelaa professionally and accurately.
+Your primary objective is to provide precise, helpful information about Sheelaa's services, expertise, testimonials, and contact details using ONLY the information provided in the context below.
+
+Chat History:
+{chat_history}
+
+Context for Response (from Sheelaa's knowledge base):
+{context}
+
+User Query: {question}
+
+RESPONSE GUIDELINES:
+1. INFORMATION ACCURACY:
+   - Answer ONLY using information from the "Context for Response" and relevant "Chat History".
+   - If the context contains sufficient information, provide a comprehensive and well-structured response.
+   - NEVER fabricate, assume, or add information not explicitly stated in the context.
+2. HANDLING INSUFFICIENT INFORMATION:
+   - If the context does NOT contain enough information to answer the query, respond with: "I don't have that specific information in Sheelaa's knowledge base. For the most accurate details about [topic], please contact Sheelaa directly."
+   - Do NOT attempt to answer questions outside Sheelaa's professional scope or services.
+3. COMMUNICATION STYLE:
+   - Maintain a polite, professional, and approachable tone that reflects Sheelaa's brand.
+   - Be concise yet thorough - provide complete answers without unnecessary elaboration.
+   - Use clear, organized formatting for multi-part responses.
+4. SPECIFIC RESPONSE REQUIREMENTS:
+   - Contact Information: If requested, provide email, phone, and address exactly as stated in the context.
+   - Services: List services clearly and specifically as mentioned in the context, avoiding generic descriptions.
+   - Testimonials: Quote or reference testimonials accurately from the context when relevant.
+   - Credentials/Background: Share only the qualifications and experience explicitly mentioned in the context.
+5. SCOPE BOUNDARIES:
+   - Stay strictly within Sheelaa's professional domain and services.
+   - Redirect off-topic questions back to Sheelaa's expertise areas.
+   - Do not provide general advice or information unrelated to Sheelaa's specific offerings.
+6. QUALITY CHECKS:
+   - Verify every factual statement against the provided context.
+   - Ensure responses directly address the user's specific question.
+   - Maintain consistency with previous responses in the chat history.
+
+Remember: You are representing Sheelaa's professional brand. Every response should reinforce her credibility, expertise, and commitment to client service while staying strictly within the bounds of the provided information.
+"""
+
+# Create a PromptTemplate instance
+QA_PROMPT = PromptTemplate(
+    template=CUSTOM_PROMPT_TEMPLATE,
+    input_variables=["chat_history", "context", "question"]
+)
+
 
 # --- Function to Initialize Knowledge Base and LLM ---
 def initialize_knowledge_base():
-    global llm, vectorstore
+    global llm, vectorstore, memory
 
     if not GOOGLE_API_KEY:
         print("Error: GOOGLE_API_KEY not found in environment variables.")
@@ -40,9 +92,14 @@ def initialize_knowledge_base():
 
     try:
         # Initialize the LLM (Large Language Model)
-        # Using gemini-1.0-pro as it's a stable and widely available model for chat
+        # Using gemini-1.5-flash for its efficiency and broad availability
         llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=GOOGLE_API_KEY, temperature=0.7)
         print("LLM (Gemini) initialized successfully.")
+
+        # Initialize conversational memory
+        # k=5 means it will remember the last 5 turns of conversation
+        memory = ConversationBufferWindowMemory(memory_key="chat_history", return_messages=True, k=5)
+        print("Conversational memory initialized.")
 
         # Load documents from the knowledge_base directory
         documents = []
@@ -60,16 +117,15 @@ def initialize_knowledge_base():
         print(f"Loaded {len(documents)} documents from knowledge base.")
 
         # Split documents into chunks for processing
+        # Adjust chunk_size and chunk_overlap as needed for your content
         text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
         docs = text_splitter.split_documents(documents)
         print(f"Split into {len(docs)} chunks.")
 
         # Create embeddings for the document chunks
-        # GoogleGenerativeAIEmbeddings is used to convert text into numerical vectors
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=GOOGLE_API_KEY)
 
         # Create a Chroma vector store from the document chunks and embeddings
-        # This allows for efficient similarity search later
         vectorstore = Chroma.from_documents(docs, embeddings)
         print("Chroma vector store created successfully.")
         return True
@@ -79,7 +135,6 @@ def initialize_knowledge_base():
         return False
 
 # Initialize knowledge base on app startup
-# This ensures the LLM and vector store are ready when the server starts
 if not initialize_knowledge_base():
     print("Failed to initialize knowledge base on startup. API will not function correctly.")
 
@@ -105,28 +160,26 @@ def chat():
 
     print(f"Received message: {user_message}")
 
-    if llm is None or vectorstore is None:
-        print("Error: LLM or vector store not initialized.")
-        return jsonify({"error": "Knowledge base or LLM not loaded. Please check backend logs."}), 500
+    if llm is None or vectorstore is None or memory is None:
+        print("Error: LLM, vector store, or memory not initialized.")
+        return jsonify({"error": "Chatbot not fully initialized. Please check backend logs."}), 500
 
     try:
-        # Create a RetrievalQA chain
-        # This chain will:
-        # 1. Retrieve relevant documents from the vectorstore based on the user's query.
-        # 2. Pass the retrieved documents and the user's query to the LLM.
-        # 3. The LLM will generate a response based on the provided context.
+        # Create a RetrievalQA chain with memory and custom prompt
         qa_chain = RetrievalQA.from_chain_type(
             llm=llm,
-            chain_type="stuff", # 'stuff' combines all retrieved docs into one prompt
+            chain_type="stuff",
             retriever=vectorstore.as_retriever(),
-            return_source_documents=False # Set to False for production to reduce log verbosity
+            memory=memory,
+            chain_type_kwargs={"prompt": QA_PROMPT},
+            return_source_documents=False
         )
 
         # Execute the QA chain with the user's message
         result = qa_chain({"query": user_message})
 
         # Extract the answer from the result
-        bot_response = result.get("result", "An error occurred while processing your request. Please try again.")
+        bot_response = result.get("result", "I apologize, but I couldn't find an answer to that in Sheelaa's knowledge base. Please try rephrasing your question or ask about her services, background, or contact details.")
 
         print(f"Sending response: {bot_response}")
         return jsonify({"response": bot_response}), 200
@@ -137,8 +190,5 @@ def chat():
         return jsonify({"error": "An error occurred while processing your request. Please try again."}), 500
 
 # This block ensures the Flask development server runs only when the script is executed directly
-# On Render, Gunicorn will manage the app, so this block is primarily for local development.
 if __name__ == "__main__":
-    # In a production environment like Render, Gunicorn will serve the app.
-    # The host and port here are for local development testing.
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, debug=True)
