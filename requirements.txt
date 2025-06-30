@@ -5,3 +5,4 @@ langchain-google-genai==2.1.5
 chromadb==0.5.3
 numpy==1.26.4
 tiktoken==0.7.0
+gunicorn==22.0.0
