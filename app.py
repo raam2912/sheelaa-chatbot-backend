@@ -20,13 +20,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # --- CORS Configuration ---
-# IMPORTANT: Replace 'https://your-netlify-frontend-url.netlify.app' with your ACTUAL Netlify URL.
-# This explicitly allows your Netlify frontend to make requests to this backend.
-# You can find your Netlify URL in your Netlify dashboard (e.g., https://random-name-12345.netlify.app)
-# If you are testing locally, you might temporarily use origins=["http://localhost:3000"] or origins=["*"]
-# For production, it's best to specify your exact frontend domain.
 CORS(app, resources={r"/*": {"origins": "https://resonant-zuccutto-bb7023.netlify.app"}})
-
 
 # --- Global Variables for LLM, Vector Store, and Memory ---
 llm = None
@@ -82,17 +76,15 @@ QA_PROMPT = PromptTemplate(
     input_variables=["chat_history", "context", "question"]
 )
 
-# --- Helper function to format chat history ---
-def format_chat_history(memory_instance): # Renamed parameter to avoid conflict with global 'memory'
+def format_chat_history(memory):
     """
-    Format the chat history from memory into a readable string format for the prompt.
+    Format the chat history from memory into a readable string format.
     """
     try:
-        # Access the list of messages directly from the chat_memory attribute
-        messages = memory_instance.chat_memory.messages
+        messages = memory.chat_memory.messages
         if not messages:
             return "No previous conversation."
-
+        
         formatted_history = []
         for message in messages:
             if isinstance(message, HumanMessage):
@@ -100,12 +92,10 @@ def format_chat_history(memory_instance): # Renamed parameter to avoid conflict 
             elif isinstance(message, AIMessage):
                 formatted_history.append(f"Assistant: {message.content}")
         
-        # IMPORTANT FIX: Return the joined string AFTER the loop finishes
         return "\n".join(formatted_history)
     except Exception as e:
         print(f"Error formatting chat history: {e}")
         return "No previous conversation."
-
 
 # --- Function to Initialize Knowledge Base and LLM ---
 def initialize_knowledge_base():
@@ -187,31 +177,30 @@ def chat():
         return jsonify({"error": "Chatbot not fully initialized. Please check backend logs."}), 500
 
     try:
-        # Format the chat history for the prompt using the new helper function
+        # Format the chat history for the prompt
         formatted_chat_history = format_chat_history(memory)
-
-        # Create a RetrievalQA chain WITHOUT directly attaching memory here,
-        # as we are manually passing the formatted chat history to invoke.
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=llm,
-            chain_type="stuff",
-            retriever=vectorstore.as_retriever(),
-            chain_type_kwargs={"prompt": QA_PROMPT},
-            return_source_documents=False
-        )
-
-        # Execute the QA chain with manually provided chat history
-        # The 'chat_history' key here directly maps to the input_variables in QA_PROMPT
-        result = qa_chain.invoke({
-            "query": user_message,
-            "chat_history": formatted_chat_history
-        })
-
-        # Extract the answer from the result
-        bot_response = result.get("result", "I apologize, but I couldn't find an answer to that in Sheelaa's knowledge base. Please try rephrasing your question or ask about her services, background, or contact details.")
+        
+        # Get relevant documents from the vector store
+        retriever = vectorstore.as_retriever()
+        relevant_docs = retriever.get_relevant_documents(user_message)
+        
+        # Format the context from retrieved documents
+        context = "\n\n".join([doc.page_content for doc in relevant_docs])
+        
+        # Create the prompt with all required variables
+        prompt_input = {
+            "chat_history": formatted_chat_history,
+            "context": context,
+            "question": user_message
+        }
+        
+        # Format the prompt
+        formatted_prompt = QA_PROMPT.format(**prompt_input)
+        
+        # Get response from LLM
+        bot_response = llm.invoke(formatted_prompt).content
 
         # Save the user message and bot response to memory
-        # This is crucial for the next turn of conversation
         memory.save_context({"input": user_message}, {"output": bot_response})
 
         print(f"Sending response: {bot_response}")
@@ -219,7 +208,6 @@ def chat():
 
     except Exception as e:
         print(f"Error processing chat message: {e}")
-        # Return a generic error message to the frontend for security/user experience
         return jsonify({"error": "An error occurred while processing your request. Please try again."}), 500
 
 # This block ensures the Flask development server runs only when the script is executed directly
