@@ -22,6 +22,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # --- CORS Configuration ---
+# IMPORTANT: This allows requests from your GitHub Pages frontend URL.
 CORS(app, resources={r"/*": {"origins": "https://raam2912.github.io"}})
 
 
@@ -54,7 +55,7 @@ def schedule_appointment_tool(service: str, date: str, time: str, client_name: s
         datetime.datetime.strptime(date, '%Y-%m-%d')
         datetime.datetime.strptime(time, '%H:%M')
     except ValueError:
-        return "I apologize, but the date or time format provided was invalid. Please use YYYY-MM-DD for date and HH:MM (24-hour) for time."
+        return "I apologize, but the date or time format provided was invalid. Please use offrant-MM-DD for date and HH:MM (24-hour) for time."
 
     return f"Great! Your appointment for a {service} on {date} at {time} has been tentatively scheduled for {client_name}. Sheelaa's team will contact you shortly at {contact_info} to confirm all details. Is there anything else I can assist you with regarding Sheelaa's services?"
 
@@ -93,7 +94,7 @@ NEVER introduce external information, personal opinions, assumptions, or fabrica
 {context}
 
 **Agent Scratchpad:**
-{agent_scratchpad} # NEW: Added agent_scratchpad here
+{agent_scratchpad} # This is where the agent writes its thoughts and tool calls
 
 **User Query: {input}**
 
@@ -155,7 +156,7 @@ NEVER introduce external information, personal opinions, assumptions, or fabrica
 - Avoid asking the same question twice or restating the user's situation back to them.
 
 **CONVERSATION MEMORY:**
-- Track what services/concepts have been mentioned.
+- Track what services/concepts has been mentioned.
 - Reference previous responses: "Building on what we discussed..." or "Since you're interested in...".
 - Avoid explaining the same service multiple times to the same person.
 
@@ -172,7 +173,7 @@ Remember: Create connection and clarity in fewer words. Every sentence should mo
 # Create a PromptTemplate instance for the agent
 AGENT_PROMPT = PromptTemplate(
     template=AGENT_PROMPT_TEMPLATE,
-    input_variables=["chat_history", "context", "input", "agent_scratchpad"] # NEW: Added agent_scratchpad here
+    input_variables=["chat_history", "context", "input", "agent_scratchpad"]
 )
 
 # --- Helper function to format chat history ---
@@ -249,28 +250,23 @@ def initialize_knowledge_base_and_agent():
         print("Chroma vector store created successfully.")
 
         # --- Configure the Agent ---
-        # The agent needs access to the retriever for RAG and the tools for function calling.
-        # It also needs the memory for chat history.
-
         # Create a retriever for the agent to use for knowledge base lookups
         retriever = vectorstore.as_retriever()
 
         # Define the agent
-        # The agent will decide whether to use a tool or the retriever based on the prompt.
         agent = create_tool_calling_agent(
             llm=llm,
-            tools=tools, # Pass the defined tools here
-            prompt=AGENT_PROMPT # Use the agent-specific prompt
+            tools=tools,
+            prompt=AGENT_PROMPT
         )
 
         # Create the AgentExecutor
-        # This is the runnable that will execute the agent's decisions.
         agent_executor = AgentExecutor(
             agent=agent,
             tools=tools,
-            verbose=True, # Set to True for detailed logs of agent's thought process
-            memory=memory, # Pass memory to the agent executor
-            handle_parsing_errors=True # Good for debugging agent's output
+            verbose=True,
+            memory=memory,
+            handle_parsing_errors=True
         )
         print("Agent Executor initialized successfully.")
 
@@ -306,28 +302,20 @@ def chat():
 
     print(f"Received message: {user_message}")
 
-    if agent_executor is None: # Check for agent_executor instead of llm/vectorstore/memory directly
+    if agent_executor is None:
         print("Error: Agent Executor not initialized.")
         return jsonify({"error": "Chatbot not fully initialized. Please check backend logs."}), 500
 
     try:
-        # The agent executor handles memory internally when passed during initialization.
-        # We just need to pass the user's input.
-        # The agent will decide whether to use a tool or retrieve from the knowledge base.
         result = agent_executor.invoke({"input": user_message})
 
-        # The agent's final answer is typically under the 'output' key
         bot_response = result.get("output", "I apologize, but I couldn't process your request at this moment. Please try again or rephrase your query.")
-
-        # AgentExecutor handles saving context to memory internally when memory is provided
-        # during its initialization. So, no manual save_context needed here.
 
         print(f"Sending response: {bot_response}")
         return jsonify({"response": bot_response}), 200
 
     except Exception as e:
         print(f"Error processing chat message: {e}")
-        # Log the full exception for debugging on Render
         import traceback
         traceback.print_exc()
         return jsonify({"error": "An error occurred while processing your request. Please try again."}), 500
