@@ -13,8 +13,8 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.prompts import PromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain.agents import AgentExecutor, create_tool_calling_agent, Tool # NEW: Agent imports
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda # NEW: For agent input handling
+from langchain.agents import AgentExecutor, create_tool_calling_agent, Tool
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 
 # Load environment variables from .env file
 load_dotenv()
@@ -22,7 +22,6 @@ load_dotenv()
 app = Flask(__name__)
 
 # --- CORS Configuration ---
-# IMPORTANT: Updated to allow requests from your GitHub Pages frontend URL.
 CORS(app, resources={r"/*": {"origins": "https://raam2912.github.io"}})
 
 
@@ -30,12 +29,10 @@ CORS(app, resources={r"/*": {"origins": "https://raam2912.github.io"}})
 llm = None
 vectorstore = None
 memory = None
-agent_executor = None # NEW: Global variable for the agent
+agent_executor = None
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # --- Mock Scheduling Tool Implementation ---
-# This function simulates booking an appointment.
-# In a commercial product, this is where you would integrate with a real calendar API (e.g., Google Calendar, Calendly).
 def schedule_appointment_tool(service: str, date: str, time: str, client_name: str, contact_info: str) -> str:
     """
     Schedules an appointment for a client with Sheelaa.
@@ -53,18 +50,15 @@ def schedule_appointment_tool(service: str, date: str, time: str, client_name: s
     print(f"Contact Info: {contact_info}")
     print(f"--------------------------------\n")
 
-    # Basic validation for demonstration
     try:
         datetime.datetime.strptime(date, '%Y-%m-%d')
         datetime.datetime.strptime(time, '%H:%M')
     except ValueError:
         return "I apologize, but the date or time format provided was invalid. Please use YYYY-MM-DD for date and HH:MM (24-hour) for time."
 
-    # Simulate a successful booking
     return f"Great! Your appointment for a {service} on {date} at {time} has been tentatively scheduled for {client_name}. Sheelaa's team will contact you shortly at {contact_info} to confirm all details. Is there anything else I can assist you with regarding Sheelaa's services?"
 
 # --- Define Langchain Tools ---
-# These are the tools the LLM (agent) can use.
 tools = [
     Tool(
         name="schedule_appointment",
@@ -80,7 +74,6 @@ tools = [
 ]
 
 # --- Agent Prompt Template ---
-# This prompt guides the agent's overall behavior, including when to use tools.
 AGENT_PROMPT_TEMPLATE = """
 You are Sheelaa's Elite AI Assistant - a warm, intuitive spiritual guide with 45+ million lives transformed.
 Respond with genuine warmth, ancient wisdom, and focused clarity.
@@ -91,15 +84,18 @@ Respond with genuine warmth, ancient wisdom, and focused clarity.
 - **Genuinely Caring:** You ask one thoughtful follow-up that opens deeper discovery.
 - **Encouragingly Authentic:** You celebrate progress, guide gently toward transformation.
 
-**RESPONSE RULES:**
-- Use ONLY the provided Context and Chat History - no external information.
-- Keep responses focused and impactful (2-3 paragraphs maximum).
-- Lead with understanding, provide key insights, end with one meaningful question.
-- Use Sheelaa's spiritual language: "alignment," "harmony," "life path," "divine timing."
+**STRICT ADHERENCE TO CONTEXT & TOOLS:**
+Your responses MUST be derived EXCLUSIVELY from the "Context for Response" (if answering a question) or the output of the tools you use (if scheduling).
+NEVER introduce external information, personal opinions, assumptions, or fabricated details.
 
 **Chat History:** {chat_history}
-**Context:** {context}
-**User Query:** {input}
+**Context for Response (from Sheelaa's Knowledge Base):**
+{context}
+
+**Agent Scratchpad:**
+{agent_scratchpad} # NEW: Added agent_scratchpad here
+
+**User Query: {input}**
 
 ---
 
@@ -115,23 +111,22 @@ Respond with genuine warmth, ancient wisdom, and focused clarity.
    - Vary your opening language naturally; avoid overusing "I can sense that..." or "It sounds like you're looking for...".
 
 **3. PROVIDE COMPREHENSIVE, CONTEXTUAL ANSWERS (for info queries):**
-   - Extract and synthesize information from the knowledge base thoughtfully.
-   - **CRITICAL: When asked about pricing for a specific service or product, if a numerical value (e.g., "₹15,000", "$25") is found in the 'Context', provide that exact price directly in your response.**
+   - CRITICAL: When asked about pricing for a specific service or product, if a numerical value (e.g., "₹15,000", "$25") is found in the 'Context', provide that exact price directly in your response.
    - Connect services to their specific needs and life situation.
    - Share relevant success patterns from Sheelaa's experience when appropriate.
    - Include practical next steps or what they can expect.
 
 **4. ASK MEANINGFUL FOLLOW-UPS (if more info is needed for tool or conversation):**
-   - **If scheduling, and details are missing:** "To schedule your [service type] appointment, I'll also need your preferred date (YYYY-MM-DD), time (HH:MM 24-hour), your full name, and a contact email or phone number. What details can you provide?"
-   - **For service needs:** "What area of your life feels most out of alignment?"
-   - **For career interest:** "Are you looking to discover your ideal career path or optimize timing for a transition?"
-   - **For relationship questions:** "Would you like compatibility insights or guidance on relationship timing?"
-   - **For numerology interest:** "Are you curious about your life path number or facing a specific decision?"
-   - **For Vastu/Space interest:** "What kind of energy shift are you hoping to create?"
-   - **General spiritual seeking:** "What aspect of your spiritual journey feels most important to focus on right now?"
+   - If scheduling, and details are missing: "To schedule your [service type] appointment, I'll also need your preferred date (YYYY-MM-DD), time (HH:MM 24-hour), your full name, and a contact email or phone number. What details can you provide?"
+   - For service needs: "What area of your life feels most out of alignment?"
+   - For career interest: "Are you looking to discover your ideal career path or optimize timing for a transition?"
+   - For relationship questions: "Would you like compatibility insights or guidance on relationship timing?"
+   - For numerology interest: "Are you curious about your life path number or facing a specific decision?"
+   - For Vastu/Space interest: "What kind of energy shift are you hoping to create?"
+   - General spiritual seeking: "What aspect of your spiritual journey feels most important to focus on right now?"
 
 **5. SOPHISTICATED KNOWLEDGE GAP HANDLING (for info queries):**
-   - **ONLY if a specific numerical price is NOT found in the 'Context' for a pricing query (e.g., for "Independent Bungalow" Vastu or if the price is genuinely missing):** "That deserves Sheelaa's personal wisdom - she can provide insights that go much deeper. For [specific topic], I'd love for you to connect with her directly. Meanwhile, what other aspect can I help illuminate?"
+   - ONLY if a specific numerical price is NOT found in the 'Context' for a pricing query (e.g., for "Independent Bungalow" Vastu or if the price is genuinely missing): "That deserves Sheelaa's personal wisdom - she can provide insights that go much deeper. For [specific topic], I'd love for you to connect with her directly. Meanwhile, what other aspect can I help illuminate?"
    - Always offer a bridge: "In the meantime, is there another aspect of your situation I can help with?"
 
 **6. CONVERSATIONAL FLOW & ENGAGEMENT:**
@@ -177,7 +172,7 @@ Remember: Create connection and clarity in fewer words. Every sentence should mo
 # Create a PromptTemplate instance for the agent
 AGENT_PROMPT = PromptTemplate(
     template=AGENT_PROMPT_TEMPLATE,
-    input_variables=["chat_history", "context", "input"] # 'input' is the user's query for the agent
+    input_variables=["chat_history", "context", "input", "agent_scratchpad"] # NEW: Added agent_scratchpad here
 )
 
 # --- Helper function to format chat history ---
